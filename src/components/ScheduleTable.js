@@ -1,5 +1,5 @@
-import React from "react";
-import { stops } from "../data/stops";
+import React, { useState } from "react";
+import { stops as initialStops } from "../data/stops";
 
 const TOOLTIPS = {
 	passingWithoutStop: "Przejeżdża bez zatrzymania",
@@ -8,32 +8,85 @@ const TOOLTIPS = {
 	kz: "Komunikacja zastępcza",
 };
 
-function TimeCell({ value }) {
-	if (!value)
-		return (
-			<td className="border border-[#b8d0e8] px-2 py-1 text-center w-20" />
-		);
-
+function TimeControl({ value }) {
 	return (
-		<td className="border border-[#b8d0e8] px-1 py-1 text-center w-20">
-			<div className="flex flex-col items-center leading-none">
-				<span className="text-[13px] font-medium text-gray-800 tabular-nums">
-					{value}
-				</span>
-				<div className="flex gap-[2px] mt-[2px]">
-					<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
-						−
-					</button>
-					<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
-						+
-					</button>
-				</div>
+		<div className="flex flex-col items-center leading-none">
+			<span className="text-[13px] font-medium text-gray-800 tabular-nums">
+				{value}
+			</span>
+			<div className="flex gap-[2px] mt-[2px]">
+				<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
+					−
+				</button>
+				<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
+					+
+				</button>
 			</div>
-		</td>
+		</div>
 	);
 }
 
 export default function ScheduleTable() {
+	const [stops, setStops] = useState(initialStops);
+
+	const hardLastIndex = stops.length - 1;
+
+	const firstActiveIndex = stops.findIndex((s) => !s.doesntPassBy);
+
+	const lastActiveIndex = (() => {
+		let i = hardLastIndex;
+		while (i >= 0 && (stops[i].doesntPassBy || i == hardLastIndex)) {
+			i--;
+		}
+		return i < hardLastIndex ? i + 1 : hardLastIndex;
+	})();
+
+	const update = (index, changes) => {
+		setStops((prev) =>
+			prev.map((stop, i) => (i == index ? { ...stop, ...changes } : stop)),
+		);
+	};
+
+	const handlePassingWithoutStop = (index, checked) => {
+		update(index, {
+			passingWithoutStop: checked,
+			anotherLineRoute: checked ? false : stops[index].anotherLineRoute,
+		});
+	};
+
+	const handleAnotherLineRoute = (index, checked) => {
+		update(index, {
+			anotherLineRoute: checked,
+			passingWithoutStop: checked ? false : stops[index].passingWithoutStop,
+		});
+	};
+
+	const handleDoesntPassBy = (index, checked) => {
+		const newLastActiveIndex = (() => {
+			let i = hardLastIndex;
+			while (i >= 0) {
+				const isX =
+					(i === index ? checked : stops[i].doesntPassBy) ||
+					i === hardLastIndex;
+				if (!isX) break;
+				i--;
+			}
+			return i < hardLastIndex ? i + 1 : hardLastIndex;
+		})();
+
+		update(index, {
+			doesntPassBy: checked,
+			passingWithoutStop:
+				checked && index !== newLastActiveIndex
+					? false
+					: stops[index].passingWithoutStop,
+			anotherLineRoute:
+				checked && index !== newLastActiveIndex
+					? false
+					: stops[index].anotherLineRoute,
+		});
+	};
+
 	return (
 		<div className="overflow-x-auto">
 			<table
@@ -83,32 +136,92 @@ export default function ScheduleTable() {
 						</th>
 					</tr>
 				</thead>
-
 				<tbody>
-					{stops.map((stop, idx) => {
-						const isLast = idx == stops.length - 1;
-						const rowBg = idx % 2 == 0 ? "bg-white" : "bg-[#eef5fc]";
+					{stops.map((stop, index) => {
+						const rowBg = index % 2 === 0 ? "bg-white" : "bg-[#eef5fc]";
+
+						const isFirstActive = index == firstActiveIndex;
+						const isLastActive = index == lastActiveIndex;
+						const isHardLast = index == hardLastIndex;
+
+						const { passingWithoutStop, anotherLineRoute, doesntPassBy } = stop;
+
+						const showArrivalControl =
+							!isFirstActive &&
+							(isHardLast ? lastActiveIndex === hardLastIndex : true);
+
+						let arrivalContent = null;
+						if (showArrivalControl) {
+							if (passingWithoutStop) {
+								arrivalContent = (
+									<span className="text-gray-600 font-semibold">|</span>
+								);
+							} else if (anotherLineRoute) {
+								arrivalContent = (
+									<span className="text-gray-600 font-semibold">&lt;</span>
+								);
+							} else if (!doesntPassBy && stop.arrival) {
+								arrivalContent = <TimeControl value={stop.arrival} />;
+							} else if (isLastActive && stop.arrival) {
+								arrivalContent = <TimeControl value={stop.arrival} />;
+							}
+						}
+
+						const showDepartureControl =
+							!isLastActive && !doesntPassBy && !isHardLast;
+
+						let departureContent = null;
+						if (showDepartureControl) {
+							if (passingWithoutStop) {
+								departureContent = (
+									<span className="text-gray-600 font-semibold">|</span>
+								);
+							} else if (anotherLineRoute) {
+								departureContent = (
+									<span className="text-gray-600 font-semibold">&lt;</span>
+								);
+							} else if (stop.departure) {
+								departureContent = <TimeControl value={stop.departure} />;
+							}
+						}
+
+						const passingWithoutStopLocked = doesntPassBy && !isLastActive;
+						const doesntPassByLocked = isHardLast;
+						const passingWithoutStopLockedFinal = isHardLast
+							? lastActiveIndex === hardLastIndex
+								? false
+								: true
+							: passingWithoutStopLocked;
 
 						return (
 							<tr key={stop.id} className={rowBg}>
-								<td className="border border-[#b8d0e8] px-2 py-1 text-gray-600 text-right">
-									{idx + 1}.
+								<td className="border border-[#b8d0e8] px-2 py-1 text-gray-600 text-right whitespace-nowrap">
+									{index + 1}.
 								</td>
 
 								<td className="border border-[#b8d0e8] px-2 py-1 text-gray-800">
 									{stop.name}
 								</td>
 
-								<TimeCell value={idx === 0 ? null : stop.arrival} />
+								<td className="border border-[#b8d0e8] px-1 py-1 text-center w-20">
+									{arrivalContent}
+								</td>
 
-								<TimeCell value={isLast ? null : stop.departure} />
+								<td className="border border-[#b8d0e8] px-1 py-1 text-center w-20">
+									{departureContent}
+								</td>
 
 								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 									<input
 										type="checkbox"
-										defaultChecked={stop.passingWithoutStop}
-										readOnly
-										className="w-[15px] h-[15px]"
+										checked={
+											passingWithoutStop && !passingWithoutStopLockedFinal
+										}
+										disabled={passingWithoutStopLockedFinal}
+										onChange={(e) =>
+											handlePassingWithoutStop(index, e.target.checked)
+										}
+										className={`w-[15px] h-[15px] ${passingWithoutStopLockedFinal ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
 										title={TOOLTIPS.passingWithoutStop}
 									/>
 								</td>
@@ -116,9 +229,12 @@ export default function ScheduleTable() {
 								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 									<input
 										type="checkbox"
-										defaultChecked={stop.anotherLineRoute}
-										readOnly
-										className="w-[15px] h-[15px]"
+										checked={anotherLineRoute && !passingWithoutStopLockedFinal}
+										disabled={passingWithoutStopLockedFinal}
+										onChange={(e) =>
+											handleAnotherLineRoute(index, e.target.checked)
+										}
+										className={`w-[15px] h-[15px] ${passingWithoutStopLockedFinal ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
 										title={TOOLTIPS.anotherLineRoute}
 									/>
 								</td>
@@ -126,10 +242,12 @@ export default function ScheduleTable() {
 								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 									<input
 										type="checkbox"
-										defaultChecked={stop.doesntPassBy}
-										readOnly
-										disabled={isLast}
-										className={`w-[15px] h-[15px] ${isLast ? "opacity-50" : ""}`}
+										checked={doesntPassBy || doesntPassByLocked}
+										disabled={doesntPassByLocked}
+										onChange={(e) =>
+											handleDoesntPassBy(index, e.target.checked)
+										}
+										className={`w-[15px] h-[15px] ${doesntPassByLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
 										title={TOOLTIPS.doesntPassBy}
 									/>
 								</td>
@@ -137,8 +255,8 @@ export default function ScheduleTable() {
 								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 									<input
 										type="text"
-										defaultValue={stop.peron}
-										maxLength={3}
+										defaultValue={stop.platform}
+										maxLength={5}
 										className="w-12 text-center text-[12px] border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-400"
 									/>
 								</td>
@@ -147,8 +265,7 @@ export default function ScheduleTable() {
 									<input
 										type="checkbox"
 										defaultChecked={stop.kz}
-										readOnly
-										className="w-[15px] h-[15px]"
+										className="w-[15px] h-[15px] cursor-pointer"
 										title={TOOLTIPS.kz}
 									/>
 								</td>
