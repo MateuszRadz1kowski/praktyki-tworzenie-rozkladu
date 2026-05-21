@@ -1,91 +1,160 @@
 import React, { useState } from "react";
 import { stops as initialStops } from "../data/stops";
+import TableHeader from "./TableHeader";
+import ScheduleRow from "./ScheduleRow";
 
-const TOOLTIPS = {
-	passingWithoutStop: "Przejeżdża bez zatrzymania",
-	anotherLineRoute: "Jedzie inną linią, kursuje inną trasą",
-	doesntPassBy: "Nie przejeżdża",
-	kz: "Komunikacja zastępcza",
+const MINUTES_IN_DAY = 1440;
+
+const convertTimeToMinutes = (timeString) => {
+	if (!timeString) return null;
+	const [hours, minutes] = timeString.split(":").map(Number);
+	return (hours * 60 + minutes) % MINUTES_IN_DAY;
 };
 
-function TimeControl({ value }) {
-	return (
-		<div className="flex flex-col items-center leading-none">
-			<span className="text-[13px] font-medium text-gray-800 tabular-nums">
-				{value}
-			</span>
-			<div className="flex gap-[2px] mt-[2px]">
-				<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
-					−
-				</button>
-				<button className="w-[18px] h-[14px] flex items-center justify-center bg-gray-100 border border-gray-300 text-gray-400 text-[9px] leading-none rounded-[2px] cursor-default select-none">
-					+
-				</button>
-			</div>
-		</div>
-	);
-}
+const formatMinutesToHHMM = (totalMinutes) => {
+	if (totalMinutes == null || totalMinutes == undefined) return null;
+	const normalizedMinutes =
+		((totalMinutes % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY;
+	const hours = Math.floor(normalizedMinutes / 60);
+	const minutes = normalizedMinutes % 60;
+	return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+};
+
+const getStepDelta = (e) => {
+	if (e.ctrlKey) return 60;
+	if (e.shiftKey) return 6;
+	return 1;
+};
 
 export default function ScheduleTable() {
-	const [stops, setStops] = useState(initialStops);
+	const [routeSegments, setRouteSegments] = useState(() =>
+		initialStops.map((stop) => ({
+			...stop,
+			isSkipped: stop.doesntPassBy ?? false,
+			arrival: convertTimeToMinutes(stop.arrival),
+			departure: convertTimeToMinutes(stop.departure),
+		})),
+	);
 
-	const hardLastIndex = stops.length - 1;
+	const isFirstStation = (idx) => idx == 0;
+	const isLastStation = (idx) => idx == routeSegments.length - 1;
 
-	const firstActiveIndex = stops.findIndex((s) => !s.doesntPassBy);
-
-	const lastActiveIndex = (() => {
-		let i = hardLastIndex;
-		while (i >= 0 && (stops[i].doesntPassBy || i == hardLastIndex)) {
-			i--;
+	const firstSkippedInSeriesIdx = (() => {
+		let firstIdx = -1;
+		for (let i = routeSegments.length - 1; i >= 0; i--) {
+			const hasX = i == routeSegments.length - 1 || routeSegments[i].isSkipped;
+			if (hasX) {
+				firstIdx = i;
+			} else {
+				break;
+			}
 		}
-		return i < hardLastIndex ? i + 1 : hardLastIndex;
+		return firstIdx;
 	})();
 
-	const update = (index, changes) => {
-		setStops((prev) =>
-			prev.map((stop, i) => (i == index ? { ...stop, ...changes } : stop)),
-		);
-	};
+	const adjustArrivalTime = (idx, e, direction) => {
+		const delta = getStepDelta(e) * direction;
+		setRouteSegments((prevSegments) => {
+			const nextSegments = [...prevSegments];
+			const current = nextSegments[idx];
+			const isX = idx == nextSegments.length - 1 || current.isSkipped;
 
-	const handlePassingWithoutStop = (index, checked) => {
-		update(index, {
-			passingWithoutStop: checked,
-			anotherLineRoute: checked ? false : stops[index].anotherLineRoute,
-		});
-	};
+			let newArrival = (current.arrival ?? current.departure ?? 0) + delta;
+			newArrival =
+				((newArrival % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY;
 
-	const handleAnotherLineRoute = (index, checked) => {
-		update(index, {
-			anotherLineRoute: checked,
-			passingWithoutStop: checked ? false : stops[index].passingWithoutStop,
-		});
-	};
-
-	const handleDoesntPassBy = (index, checked) => {
-		const newLastActiveIndex = (() => {
-			let i = hardLastIndex;
-			while (i >= 0) {
-				const isX =
-					(i === index ? checked : stops[i].doesntPassBy) ||
-					i === hardLastIndex;
-				if (!isX) break;
-				i--;
+			if (
+				current.departure !== null &&
+				!isX &&
+				newArrival > current.departure
+			) {
+				newArrival = current.departure;
 			}
-			return i < hardLastIndex ? i + 1 : hardLastIndex;
-		})();
 
-		update(index, {
-			doesntPassBy: checked,
-			passingWithoutStop:
-				checked && index !== newLastActiveIndex
-					? false
-					: stops[index].passingWithoutStop,
-			anotherLineRoute:
-				checked && index !== newLastActiveIndex
-					? false
-					: stops[index].anotherLineRoute,
+			let previousDeparture = null;
+			for (let i = idx - 1; i >= 0; i--) {
+				if (!nextSegments[i].isSkipped && nextSegments[i].departure !== null) {
+					previousDeparture = nextSegments[i].departure;
+					break;
+				}
+			}
+			if (previousDeparture !== null && newArrival <= previousDeparture) {
+				newArrival = previousDeparture + 1;
+			}
+
+			nextSegments[idx] = { ...current, arrival: newArrival };
+			return nextSegments;
 		});
 	};
+
+	const adjustDepartureTime = (idx, e, direction) => {
+		const delta = getStepDelta(e) * direction;
+		setRouteSegments((prevSegments) => {
+			const nextSegments = [...prevSegments];
+			const current = nextSegments[idx];
+			const oldDeparture = current.departure ?? 0;
+
+			let newDeparture = oldDeparture + delta;
+			newDeparture =
+				((newDeparture % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY;
+
+			if (direction == -1) {
+				const minAllowed = current.arrival !== null ? current.arrival : 0;
+				if (newDeparture < minAllowed) newDeparture = minAllowed;
+				nextSegments[idx] = { ...current, departure: newDeparture };
+			} else {
+				const actualDelta = newDeparture - oldDeparture;
+				nextSegments[idx] = { ...current, departure: newDeparture };
+
+				for (let i = idx + 1; i < nextSegments.length; i++) {
+					const nextStop = nextSegments[i];
+					nextSegments[i] = {
+						...nextStop,
+						arrival:
+							nextStop.arrival !== null
+								? (nextStop.arrival + actualDelta) % MINUTES_IN_DAY
+								: null,
+						departure:
+							nextStop.departure !== null
+								? (nextStop.departure + actualDelta) % MINUTES_IN_DAY
+								: null,
+					};
+				}
+			}
+
+			return nextSegments;
+		});
+	};
+
+	const updateSegmentProperties = (idx, changes) =>
+		setRouteSegments((prev) =>
+			prev.map((segment, i) =>
+				i == idx ? { ...segment, ...changes } : segment,
+			),
+		);
+
+	const togglePassingWithoutStopping = (idx, isChecked) =>
+		updateSegmentProperties(idx, {
+			passingWithoutStop: isChecked,
+			anotherLineRoute: isChecked ? false : routeSegments[idx].anotherLineRoute,
+		});
+
+	const toggleAlternativeRoute = (idx, isChecked) =>
+		updateSegmentProperties(idx, {
+			anotherLineRoute: isChecked,
+			passingWithoutStop: isChecked
+				? false
+				: routeSegments[idx].passingWithoutStop,
+		});
+
+	const toggleSkippedSegment = (idx, isChecked) =>
+		updateSegmentProperties(idx, {
+			isSkipped: isChecked,
+			passingWithoutStop: isChecked
+				? false
+				: routeSegments[idx].passingWithoutStop,
+			anotherLineRoute: isChecked ? false : routeSegments[idx].anotherLineRoute,
+		});
 
 	return (
 		<div className="overflow-x-auto">
@@ -93,185 +162,25 @@ export default function ScheduleTable() {
 				className="w-full border-collapse text-[13px]"
 				style={{ minWidth: 540 }}
 			>
-				<thead>
-					<tr className="bg-[#c5ddf5] text-gray-800">
-						<th className="border border-[#a0c0dc] px-2 py-1.5 text-left font-semibold w-8">
-							Lp
-						</th>
-						<th className="border border-[#a0c0dc] px-2 py-1.5 text-left font-semibold">
-							Miejscowość
-						</th>
-						<th className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-20">
-							Przyjazd
-						</th>
-						<th className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-20">
-							Odjazd
-						</th>
-						<th
-							title={TOOLTIPS.passingWithoutStop}
-							className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-10 cursor-help"
-						>
-							|
-						</th>
-						<th
-							title={TOOLTIPS.anotherLineRoute}
-							className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-10 cursor-help"
-						>
-							&lt;
-						</th>
-						<th
-							title={TOOLTIPS.doesntPassBy}
-							className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-10 cursor-help"
-						>
-							x
-						</th>
-						<th className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-16">
-							Peron
-						</th>
-						<th
-							title={TOOLTIPS.kz}
-							className="border border-[#a0c0dc] px-2 py-1.5 text-center font-semibold w-8 cursor-help"
-						>
-							Kz
-						</th>
-					</tr>
-				</thead>
+				<TableHeader />
 				<tbody>
-					{stops.map((stop, index) => {
-						const rowBg = index % 2 === 0 ? "bg-white" : "bg-[#eef5fc]";
-
-						const isFirstActive = index == firstActiveIndex;
-						const isLastActive = index == lastActiveIndex;
-						const isHardLast = index == hardLastIndex;
-
-						const { passingWithoutStop, anotherLineRoute, doesntPassBy } = stop;
-
-						const showArrivalControl =
-							!isFirstActive &&
-							(isHardLast ? lastActiveIndex === hardLastIndex : true);
-
-						let arrivalContent = null;
-						if (showArrivalControl) {
-							if (passingWithoutStop) {
-								arrivalContent = (
-									<span className="text-gray-600 font-semibold">|</span>
-								);
-							} else if (anotherLineRoute) {
-								arrivalContent = (
-									<span className="text-gray-600 font-semibold">&lt;</span>
-								);
-							} else if (!doesntPassBy && stop.arrival) {
-								arrivalContent = <TimeControl value={stop.arrival} />;
-							} else if (isLastActive && stop.arrival) {
-								arrivalContent = <TimeControl value={stop.arrival} />;
-							}
-						}
-
-						const showDepartureControl =
-							!isLastActive && !doesntPassBy && !isHardLast;
-
-						let departureContent = null;
-						if (showDepartureControl) {
-							if (passingWithoutStop) {
-								departureContent = (
-									<span className="text-gray-600 font-semibold">|</span>
-								);
-							} else if (anotherLineRoute) {
-								departureContent = (
-									<span className="text-gray-600 font-semibold">&lt;</span>
-								);
-							} else if (stop.departure) {
-								departureContent = <TimeControl value={stop.departure} />;
-							}
-						}
-
-						const passingWithoutStopLocked = doesntPassBy && !isLastActive;
-						const doesntPassByLocked = isHardLast;
-						const passingWithoutStopLockedFinal = isHardLast
-							? lastActiveIndex === hardLastIndex
-								? false
-								: true
-							: passingWithoutStopLocked;
-
-						return (
-							<tr key={stop.id} className={rowBg}>
-								<td className="border border-[#b8d0e8] px-2 py-1 text-gray-600 text-right whitespace-nowrap">
-									{index + 1}.
-								</td>
-
-								<td className="border border-[#b8d0e8] px-2 py-1 text-gray-800">
-									{stop.name}
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center w-20">
-									{arrivalContent}
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center w-20">
-									{departureContent}
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
-									<input
-										type="checkbox"
-										checked={
-											passingWithoutStop && !passingWithoutStopLockedFinal
-										}
-										disabled={passingWithoutStopLockedFinal}
-										onChange={(e) =>
-											handlePassingWithoutStop(index, e.target.checked)
-										}
-										className={`w-[15px] h-[15px] ${passingWithoutStopLockedFinal ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-										title={TOOLTIPS.passingWithoutStop}
-									/>
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
-									<input
-										type="checkbox"
-										checked={anotherLineRoute && !passingWithoutStopLockedFinal}
-										disabled={passingWithoutStopLockedFinal}
-										onChange={(e) =>
-											handleAnotherLineRoute(index, e.target.checked)
-										}
-										className={`w-[15px] h-[15px] ${passingWithoutStopLockedFinal ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
-										title={TOOLTIPS.anotherLineRoute}
-									/>
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
-									<input
-										type="checkbox"
-										checked={doesntPassBy || doesntPassByLocked}
-										disabled={doesntPassByLocked}
-										onChange={(e) =>
-											handleDoesntPassBy(index, e.target.checked)
-										}
-										className={`w-[15px] h-[15px] ${doesntPassByLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-										title={TOOLTIPS.doesntPassBy}
-									/>
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
-									<input
-										type="text"
-										defaultValue={stop.platform}
-										maxLength={5}
-										className="w-12 text-center text-[12px] border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-400"
-									/>
-								</td>
-
-								<td className="border border-[#b8d0e8] px-1 py-1 text-center">
-									<input
-										type="checkbox"
-										defaultChecked={stop.kz}
-										className="w-[15px] h-[15px] cursor-pointer"
-										title={TOOLTIPS.kz}
-									/>
-								</td>
-							</tr>
-						);
-					})}
+					{routeSegments.map((segment, idx) => (
+						<ScheduleRow
+							key={segment.id}
+							segment={segment}
+							index={idx}
+							isFirstStation={isFirstStation(idx)}
+							isLastStation={isLastStation(idx)}
+							showArrivalForSkipped={idx == firstSkippedInSeriesIdx}
+							formattedArrival={formatMinutesToHHMM(segment.arrival)}
+							formattedDeparture={formatMinutesToHHMM(segment.departure)}
+							onAdjustArrival={adjustArrivalTime}
+							onAdjustDeparture={adjustDepartureTime}
+							onTogglePassingWithoutStopping={togglePassingWithoutStopping}
+							onToggleAlternativeRoute={toggleAlternativeRoute}
+							onToggleSkippedSegment={toggleSkippedSegment}
+						/>
+					))}
 				</tbody>
 			</table>
 		</div>
