@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { stops as initialStops } from "../data/stops";
 import TableHeader from "./TableHeader";
 import ScheduleRow from "./ScheduleRow";
@@ -52,12 +52,31 @@ export default function ScheduleTable() {
 		return firstIdx;
 	})();
 
+	useEffect(() => {
+		const currentTableData = routeSegments.map((segment, idx) => {
+			return {
+				lp: idx + 1,
+				name: segment.name,
+				arrival: formatMinutesToHHMM(segment.arrival),
+				departure: formatMinutesToHHMM(segment.departure),
+				passingWithoutStop: segment.passingWithoutStop,
+				anotherLineRoute: segment.anotherLineRoute,
+				isSkipped: segment.isSkipped,
+				peron: segment.peron || "",
+				kz: segment.kz,
+			};
+		});
+
+		console.clear();
+		console.table(currentTableData);
+	}, [routeSegments]);
+
 	const adjustArrivalTime = (idx, e, direction) => {
 		const delta = getStepDelta(e) * direction;
 		setRouteSegments((prevSegments) => {
 			const nextSegments = [...prevSegments];
 			const current = nextSegments[idx];
-			const isX = idx == nextSegments.length - 1 || current.isSkipped;
+			const isX = idx === nextSegments.length - 1 || current.isSkipped;
 
 			let newArrival = (current.arrival ?? current.departure ?? 0) + delta;
 			newArrival =
@@ -98,7 +117,7 @@ export default function ScheduleTable() {
 			newDeparture =
 				((newDeparture % MINUTES_IN_DAY) + MINUTES_IN_DAY) % MINUTES_IN_DAY;
 
-			if (direction == -1) {
+			if (direction === -1) {
 				const minAllowed = current.arrival !== null ? current.arrival : 0;
 				if (newDeparture < minAllowed) newDeparture = minAllowed;
 				nextSegments[idx] = { ...current, departure: newDeparture };
@@ -129,32 +148,9 @@ export default function ScheduleTable() {
 	const updateSegmentProperties = (idx, changes) =>
 		setRouteSegments((prev) =>
 			prev.map((segment, i) =>
-				i == idx ? { ...segment, ...changes } : segment,
+				i === idx ? { ...segment, ...changes } : segment,
 			),
 		);
-
-	const togglePassingWithoutStopping = (idx, isChecked) =>
-		updateSegmentProperties(idx, {
-			passingWithoutStop: isChecked,
-			anotherLineRoute: isChecked ? false : routeSegments[idx].anotherLineRoute,
-		});
-
-	const toggleAlternativeRoute = (idx, isChecked) =>
-		updateSegmentProperties(idx, {
-			anotherLineRoute: isChecked,
-			passingWithoutStop: isChecked
-				? false
-				: routeSegments[idx].passingWithoutStop,
-		});
-
-	const toggleSkippedSegment = (idx, isChecked) =>
-		updateSegmentProperties(idx, {
-			isSkipped: isChecked,
-			passingWithoutStop: isChecked
-				? false
-				: routeSegments[idx].passingWithoutStop,
-			anotherLineRoute: isChecked ? false : routeSegments[idx].anotherLineRoute,
-		});
 
 	return (
 		<div className="overflow-x-auto">
@@ -171,14 +167,44 @@ export default function ScheduleTable() {
 							index={idx}
 							isFirstStation={isFirstStation(idx)}
 							isLastStation={isLastStation(idx)}
-							showArrivalForSkipped={idx == firstSkippedInSeriesIdx}
+							showArrivalForSkipped={idx === firstSkippedInSeriesIdx}
 							formattedArrival={formatMinutesToHHMM(segment.arrival)}
 							formattedDeparture={formatMinutesToHHMM(segment.departure)}
 							onAdjustArrival={adjustArrivalTime}
 							onAdjustDeparture={adjustDepartureTime}
-							onTogglePassingWithoutStopping={togglePassingWithoutStopping}
-							onToggleAlternativeRoute={toggleAlternativeRoute}
-							onToggleSkippedSegment={toggleSkippedSegment}
+							onChangePeron={(idx, val) =>
+								updateSegmentProperties(idx, { peron: val })
+							}
+							onTogglePassingWithoutStopping={(idx, chk) =>
+								updateSegmentProperties(idx, {
+									passingWithoutStop: chk,
+									anotherLineRoute: chk
+										? false
+										: routeSegments[idx].anotherLineRoute,
+								})
+							}
+							onToggleAlternativeRoute={(idx, chk) =>
+								updateSegmentProperties(idx, {
+									anotherLineRoute: chk,
+									passingWithoutStop: chk
+										? false
+										: routeSegments[idx].passingWithoutStop,
+								})
+							}
+							onToggleSkippedSegment={(idx, chk) =>
+								updateSegmentProperties(idx, {
+									isSkipped: chk,
+									passingWithoutStop: chk
+										? false
+										: routeSegments[idx].passingWithoutStop,
+									anotherLineRoute: chk
+										? false
+										: routeSegments[idx].anotherLineRoute,
+								})
+							}
+							onToggleKz={(idx, chk) =>
+								updateSegmentProperties(idx, { kz: chk })
+							}
 						/>
 					))}
 				</tbody>

@@ -12,9 +12,11 @@ export default function ScheduleRow({
 	formattedDeparture,
 	onAdjustArrival,
 	onAdjustDeparture,
+	onChangePeron,
 	onTogglePassingWithoutStopping,
 	onToggleAlternativeRoute,
 	onToggleSkippedSegment,
+	onToggleKz,
 }) {
 	const { passingWithoutStop, anotherLineRoute, isSkipped, name, peron, kz } =
 		segment;
@@ -123,9 +125,10 @@ export default function ScheduleRow({
 			<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 				<input
 					type="text"
-					defaultValue={peron}
+					value={peron}
 					maxLength={5}
 					disabled={isCheckedX}
+					onChange={(e) => onChangePeron(index, e.target.value)}
 					className={`w-12 text-center text-[12px] border border-gray-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-400 ${isCheckedX ? "bg-gray-100 text-gray-400" : ""}`}
 				/>
 			</td>
@@ -133,8 +136,9 @@ export default function ScheduleRow({
 			<td className="border border-[#b8d0e8] px-1 py-1 text-center">
 				<input
 					type="checkbox"
-					defaultChecked={kz}
+					checked={kz && !isCheckedX}
 					disabled={isCheckedX}
+					onChange={(e) => onToggleKz(index, e.target.checked)}
 					className={`w-[15px] h-[15px] ${isCheckedX ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
 					title={ROUTE_TOOLTIPS.replacementBus}
 				/>
